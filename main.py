@@ -4,59 +4,65 @@ from datetime import datetime, date
 import os
 import logging
 from dotenv import load_dotenv
+from functools import lru_cache
 
 # -------------------------
-# Load environment variables from .env (local only)
+# Load .env for local development only
 # -------------------------
 load_dotenv()
 
 # -------------------------
-# Setup logging
+# Logging setup
 # -------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # -------------------------
-# Read environment variables
+# Environment variable utilities
 # -------------------------
-API_KEY = os.getenv("API_KEY")
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+def get_env_variable(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
 
-if not API_KEY:
-    raise RuntimeError("Missing required environment variable: API_KEY")
-if not NOTION_TOKEN:
-    raise RuntimeError("Missing required environment variable: NOTION_TOKEN")
-if not NOTION_DATABASE_ID:
-    raise RuntimeError("Missing required environment variable: NOTION_DATABASE_ID")
+@lru_cache
+def get_api_key():
+    return get_env_variable("API_KEY")
+
+@lru_cache
+def get_notion_client():
+    return Client(auth=get_env_variable("NOTION_TOKEN"))
+
+@lru_cache
+def get_database_id():
+    return get_env_variable("NOTION_DATABASE_ID")
 
 # -------------------------
-# Flask + Notion setup
+# Flask setup
 # -------------------------
 app = Flask(__name__)
-notion = Client(auth=NOTION_TOKEN)
 
+# -------------------------
+# Middleware
+# -------------------------
 def check_api_key():
-    """Check if the incoming API key matches the expected API key."""
     incoming_key = request.headers.get("X-API-Key")
-    if incoming_key != API_KEY:
+    if incoming_key != get_api_key():
         abort(401, description="Unauthorized")
 
 def validate_database_schema():
-    """Validate that the Notion database has the required properties."""
     try:
-        database = notion.databases.retrieve(database_id=NOTION_DATABASE_ID)
+        notion = get_notion_client()
+        database = notion.databases.retrieve(database_id=get_database_id())
         required_properties = ["Command", "Action", "Status"]
         for prop in required_properties:
             if prop not in database["properties"]:
                 raise RuntimeError(f"Missing required property: {prop}")
     except Exception as e:
         logger.error(f"Failed to validate database schema: {e}")
-        raise RuntimeError(f"Failed to validate database schema: {str(e)}")
+        raise
 
-# -------------------------
-# Validate on startup
-# -------------------------
 validate_database_schema()
 
 @app.route("/")
@@ -66,18 +72,17 @@ def home():
 # -------------------------
 # CRUD Endpoints
 # -------------------------
-
 @app.route("/create", methods=["POST"])
 def create():
     check_api_key()
     data = request.get_json(silent=True)
-    print("[DEBUG] Received /create data:", data)
     if not data or not all(k in data for k in ["command", "action", "status"]):
         return jsonify({"error": "Missing required fields"}), 400
     now = datetime.now().isoformat()
     try:
+        notion = get_notion_client()
         notion.pages.create(
-            parent={"database_id": NOTION_DATABASE_ID},
+            parent={"database_id": get_database_id()},
             properties={
                 "Command": {"title": [{"text": {"content": data["command"]}}]},
                 "Action": {"rich_text": [{"text": {"content": data["action"]}}]},
@@ -95,7 +100,8 @@ def create():
 def fetch():
     check_api_key()
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         results = [
             {
                 "Command": p["properties"]["Command"]["title"][0]["plain_text"],
@@ -114,7 +120,8 @@ def update():
     if not data or not all(k in data for k in ["command", "action", "status"]):
         return jsonify({"error": "Missing required fields"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
             if title == data["command"]:
@@ -139,7 +146,8 @@ def delete():
     if not data or "command" not in data:
         return jsonify({"error": "Missing required field: command"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
             if title == data["command"]:
@@ -151,9 +159,8 @@ def delete():
         return jsonify({"error": str(e)}), 500
 
 # -------------------------
-# Smart Endpoints
+# Smart & Utility Endpoints
 # -------------------------
-
 @app.route("/search", methods=["GET"])
 def search():
     check_api_key()
@@ -161,7 +168,8 @@ def search():
     if not query_param:
         return jsonify({"error": "Missing query parameter"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         results = []
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
@@ -182,7 +190,8 @@ def filter_by_status():
     if not status:
         return jsonify({"error": "Missing status parameter"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         filtered = [
             {
                 "Command": p["properties"]["Command"]["title"][0]["plain_text"],
@@ -198,8 +207,9 @@ def filter_by_status():
 def grouped_by_status():
     check_api_key()
     try:
+        notion = get_notion_client()
         grouped = {}
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             status = page["properties"]["Status"]["select"]["name"]
             title = page["properties"]["Command"]["title"][0]["plain_text"]
@@ -216,7 +226,8 @@ def get_task():
     if not command:
         return jsonify({"error": "Missing command parameter"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
             if title.lower() == command.lower():
@@ -234,7 +245,8 @@ def get_task():
 def status_counts():
     check_api_key()
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         counts = {}
         for page in pages:
             status = page["properties"]["Status"]["select"]["name"]
@@ -251,13 +263,14 @@ def duplicate():
     if not data or "command" not in data:
         return jsonify({"error": "Missing required field: command"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
             if title == data["command"]:
                 now = datetime.now().isoformat()
                 notion.pages.create(
-                    parent={"database_id": NOTION_DATABASE_ID},
+                    parent={"database_id": get_database_id()},
                     properties={
                         "Command": {"title": [{"text": {"content": f"{title} (Copy)"}}]},
                         "Action": page["properties"]["Action"],
@@ -279,7 +292,8 @@ def complete():
     if not data or "command" not in data:
         return jsonify({"error": "Missing required field: command"}), 400
     try:
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        notion = get_notion_client()
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             title = page["properties"]["Command"]["title"][0]["plain_text"]
             if title == data["command"]:
@@ -301,8 +315,9 @@ def daily_summary():
     check_api_key()
     today = date.today().isoformat()
     try:
+        notion = get_notion_client()
         results = []
-        pages = notion.databases.query(database_id=NOTION_DATABASE_ID)["results"]
+        pages = notion.databases.query(database_id=get_database_id())["results"]
         for page in pages:
             created = page["properties"].get("Created At", {}).get("rich_text", [{}])[0].get("text", {}).get("content", "")
             if created.startswith(today):
