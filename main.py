@@ -71,6 +71,7 @@ def home():
 def create():
     check_api_key()
     data = request.get_json(silent=True)
+    print("[DEBUG] Received /create data:", data)
     if not data or not all(k in data for k in ["command", "action", "status"]):
         return jsonify({"error": "Missing required fields"}), 400
     now = datetime.now().isoformat()
