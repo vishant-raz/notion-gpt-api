@@ -1,3 +1,9 @@
+API_KEY = os.getenv("API_KEY", "notionGPT_9821KEY")
+
+def check_api_key():
+    incoming_key = request.headers.get("X-API-Key")
+    if incoming_key != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
 from flask import Flask, request, jsonify, abort
 from notion_client import Client
 import os
