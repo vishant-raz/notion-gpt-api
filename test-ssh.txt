@@ -1,0 +1,4 @@
+SSH Push Test
+=============
+This file is used to verify that my Git remote is using the SSH alias
+(github-accountB) and key for Account B.
