@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from functools import lru_cache
 import csv
 from io import StringIO
+import pandas as pd
+from werkzeug.utils import secure_filename
 
 # -------------------------
 # Load .env for local development only
@@ -339,51 +341,79 @@ def daily_summary():
         logger.error(f"Daily summary failed: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route("/upload-csv", methods=["POST"])
+@app.route('/upload-csv', methods=['POST'])
 def upload_csv():
     check_api_key()
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part in the request"}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
-
     try:
-        # Read the CSV file
-        stream = StringIO(file.stream.read().decode("UTF-8"))
-        csv_reader = csv.DictReader(stream)
+        # Check if file is in the request
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part in the request'}), 400
 
-        # Parse and process the CSV data
-        tasks = []
-        for row in csv_reader:
-            if not all(key in row for key in ["command", "action", "status"]):
-                return jsonify({"error": "CSV is missing required columns: command, action, status"}), 400
+        file = request.files['file']
+        database_id = request.form.get('database_id', get_database_id())
 
-            tasks.append({
-                "command": row["command"],
-                "action": row["action"],
-                "status": row["status"]
-            })
+        if not file or file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
 
-        # Optionally, save tasks to Notion or process further
+        # Secure the filename
+        filename = secure_filename(file.filename)
+
+        # Parse the CSV file using pandas
+        try:
+            df = pd.read_csv(file)
+        except Exception as e:
+            return jsonify({'error': f'Failed to parse CSV: {str(e)}'}), 400
+
+        # Validate required columns dynamically
+        required_columns = ["Name", "Category Tag", "Cycle", "Dosage", "Function", "Notes", "Reminder Set", "Taken Today"]
+        if not all(col in df.columns for col in required_columns):
+            return jsonify({'error': f'Missing required columns. Required: {required_columns}'}), 400
+
+        # Initialize Notion client
         notion = get_notion_client()
-        for task in tasks:
+
+        # Iterate through rows and create Notion pages
+        for _, row in df.iterrows():
             notion.pages.create(
-                parent={"database_id": get_database_id()},
+                parent={"database_id": database_id},
                 properties={
-                    "Command": {"title": [{"text": {"content": task["command"]}}]},
-                    "Action": {"rich_text": [{"text": {"content": task["action"]}}]},
-                    "Status": {"select": {"name": task["status"]}},
-                    "Created At": {"rich_text": [{"text": {"content": datetime.now().isoformat()}}]},
-                    "Last Updated": {"rich_text": [{"text": {"content": datetime.now().isoformat()}}]}
+                    "Name": {
+                        "title": [{"text": {"content": str(row['Name'])}}]
+                    },
+                    "Category Tag": {
+                        "select": {"name": str(row['Category Tag'])}
+                    },
+                    "Cycle": {
+                        "rich_text": [{"text": {"content": str(row['Cycle'])}}]
+                    },
+                    "Dosage": {
+                        "rich_text": [{"text": {"content": str(row['Dosage'])}}]
+                    },
+                    "Function": {
+                        "multi_select": [
+                            {"name": tag.strip()} for tag in str(row['Function']).split(',') if tag.strip()
+                        ]
+                    },
+                    "Notes": {
+                        "rich_text": [{"text": {"content": str(row['Notes'])}}]
+                    },
+                    "Reminder Set": {
+                        "checkbox": str(row['Reminder Set']).lower() in ['true', 'yes', '1', 'checked']
+                    },
+                    "Taken Today": {
+                        "checkbox": str(row['Taken Today']).lower() in ['true', 'yes', '1', 'checked']
+                    },
+                    "Uploaded At": {
+                        "rich_text": [{"text": {"content": datetime.now().isoformat()}}]
+                    }
                 }
             )
 
-        return jsonify({"message": "CSV uploaded and processed successfully", "tasks": tasks}), 200
+        return jsonify({"message": "CSV uploaded and Notion entries created successfully!"}), 200
+
     except Exception as e:
         logger.error(f"CSV upload failed: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 # -------------------------
 # Run the server

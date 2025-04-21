@@ -1,0 +1,180 @@
+openapi: 3.1.0
+info:
+  title: Notion GPT API
+  version: 1.1.0
+  description: OpenAPI schema for your Notion GPT integration
+
+servers:
+  - url: https://notion-gpt-plan-guagf0dsf9f7d5g5.centralindia-01.azurewebsites.net
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    CreateRequest:
+      type: object
+      properties:
+        command:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+      required: [command, action, status]
+
+    UpdateRequest:
+      type: object
+      properties:
+        command:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+      required: [command, action, status]
+
+    DeleteRequest:
+      type: object
+      properties:
+        command:
+          type: string
+      required: [command]
+
+    CompleteRequest:
+      type: object
+      properties:
+        command:
+          type: string
+      required: [command]
+
+    DuplicateRequest:
+      type: object
+      properties:
+        command:
+          type: string
+      required: [command]
+
+    UploadCSVRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        database_id:
+          type: string
+      required: [file]
+
+    TaskResponse:
+      type: object
+      properties:
+        Command:
+          type: string
+        Action:
+          type: string
+        Status:
+          type: string
+
+paths:
+  /upload-csv:
+    post:
+      summary: Upload a CSV file and create Notion entries
+      operationId: uploadCSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadCSVRequest'
+      responses:
+        '200':
+          description: CSV uploaded and Notion entries created successfully
+        '400':
+          description: Bad request
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /create:
+    post:
+      summary: Create a new task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequest'
+      responses:
+        '200':
+          description: Task created
+      security:
+        - ApiKeyAuth: []
+
+  /update:
+    post:
+      summary: Update an existing task
+      operationId: updateTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRequest'
+      responses:
+        '200':
+          description: Task updated
+      security:
+        - ApiKeyAuth: []
+
+  /delete:
+    post:
+      summary: Delete a task
+      operationId: deleteTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Task deleted
+      security:
+        - ApiKeyAuth: []
+
+  /complete:
+    post:
+      summary: Mark a task as complete
+      operationId: completeTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteRequest'
+      responses:
+        '200':
+          description: Task marked complete
+      security:
+        - ApiKeyAuth: []
+
+  /duplicate:
+    post:
+      summary: Duplicate a task
+      operationId: duplicateTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DuplicateRequest'
+      responses:
+        '200':
+          description: Task duplicated
+      security:
+        - ApiKeyAuth: []
