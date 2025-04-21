@@ -2,3 +2,4 @@ flask
 notion-client
 python-dotenv
 gunicorn
+pandas
