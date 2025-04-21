@@ -5,6 +5,8 @@ import os
 import logging
 from dotenv import load_dotenv
 from functools import lru_cache
+import csv
+from io import StringIO
 
 # -------------------------
 # Load .env for local development only
@@ -335,6 +337,52 @@ def daily_summary():
         return jsonify(results), 200
     except Exception as e:
         logger.error(f"Daily summary failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/upload-csv", methods=["POST"])
+def upload_csv():
+    check_api_key()
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    try:
+        # Read the CSV file
+        stream = StringIO(file.stream.read().decode("UTF-8"))
+        csv_reader = csv.DictReader(stream)
+
+        # Parse and process the CSV data
+        tasks = []
+        for row in csv_reader:
+            if not all(key in row for key in ["command", "action", "status"]):
+                return jsonify({"error": "CSV is missing required columns: command, action, status"}), 400
+
+            tasks.append({
+                "command": row["command"],
+                "action": row["action"],
+                "status": row["status"]
+            })
+
+        # Optionally, save tasks to Notion or process further
+        notion = get_notion_client()
+        for task in tasks:
+            notion.pages.create(
+                parent={"database_id": get_database_id()},
+                properties={
+                    "Command": {"title": [{"text": {"content": task["command"]}}]},
+                    "Action": {"rich_text": [{"text": {"content": task["action"]}}]},
+                    "Status": {"select": {"name": task["status"]}},
+                    "Created At": {"rich_text": [{"text": {"content": datetime.now().isoformat()}}]},
+                    "Last Updated": {"rich_text": [{"text": {"content": datetime.now().isoformat()}}]}
+                }
+            )
+
+        return jsonify({"message": "CSV uploaded and processed successfully", "tasks": tasks}), 200
+    except Exception as e:
+        logger.error(f"CSV upload failed: {e}")
         return jsonify({"error": str(e)}), 500
 
 # -------------------------
